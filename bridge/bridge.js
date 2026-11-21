@@ -5,29 +5,47 @@ const net = require("net")
 // 'ws' is the package we installed — gives us a WebSocket server
 const { WebSocketServer } = require("ws")
 
+// ─── CONFIGURATION ─────────────────────────────────────────
+const PORT = parseInt(process.env.PORT || "8080", 10)
+const PYTHON_HOST = process.env.PYTHON_HOST || "127.0.0.1"
+const PYTHON_PORT = parseInt(process.env.PYTHON_PORT || "5000", 10)
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ? process.env.ALLOWED_ORIGIN.trim() : null
 
 // ─── CREATE WEBSOCKET SERVER ────────────────────────────────
-// React frontend will connect to this on port 8080
-// (browser can't do raw TCP, so we give it WebSocket)
-const wss = new WebSocketServer({ port: 8080 })
+// React frontend will connect to this on PORT (default 8080 or cloud PORT)
+const wss = new WebSocketServer({
+    port: PORT,
+    verifyClient: (info, callback) => {
+        if (!ALLOWED_ORIGIN) {
+            // Allow all origins when ALLOWED_ORIGIN is not configured
+            return callback(true)
+        }
+        const reqOrigin = info.origin || (info.req && info.req.headers && info.req.headers.origin)
+        // If an Origin header was provided and doesn't match ALLOWED_ORIGIN, reject
+        if (reqOrigin && reqOrigin !== ALLOWED_ORIGIN) {
+            console.log(`[Bridge] Rejected connection from unauthorized origin: ${reqOrigin} (allowed: ${ALLOWED_ORIGIN})`)
+            return callback(false, 403, "Forbidden: Unauthorized Origin")
+        }
+        callback(true)
+    }
+})
 
-console.log("Bridge is running on port 8080")
-
+console.log(`Bridge is running on port ${PORT}, forwarding to Python server on ${PYTHON_HOST}:${PYTHON_PORT}`)
+if (ALLOWED_ORIGIN) {
+    console.log(`Bridge origin restricted to: ${ALLOWED_ORIGIN}`)
+}
 
 // ─── WHEN A BROWSER (FRONTEND) CONNECTS ────────────────────
-// 'ws' here is the WebSocket connection to that one browser tab
 wss.on("connection", (ws) => {
     console.log("Frontend connected via WebSocket")
 
     // For every frontend connection, open a fresh TCP connection to Python
-    // Python server is running on the same machine, port 5000
-    const tcp = net.createConnection({ port: 5000, host: "127.0.0.1" }, () => {
-        console.log("TCP connection to Python server established")
+    const tcp = net.createConnection({ port: PYTHON_PORT, host: PYTHON_HOST }, () => {
+        console.log(`TCP connection to Python server established (${PYTHON_HOST}:${PYTHON_PORT})`)
     })
 
-    // Buffer to handle partial TCP messages (same reason as Python side)
+    // Buffer to handle partial TCP messages
     let buffer = ""
-
 
     // ─── FRONTEND → PYTHON ──────────────────────────────────
     // When frontend sends a JSON message via WebSocket,
@@ -35,7 +53,6 @@ wss.on("connection", (ws) => {
     ws.on("message", (data) => {
         tcp.write(data.toString() + "\n")
     })
-
 
     // ─── PYTHON → FRONTEND ──────────────────────────────────
     // When Python sends data back over TCP,
@@ -58,7 +75,6 @@ wss.on("connection", (ws) => {
             }
         })
     })
-
 
     // ─── CLEANUP ────────────────────────────────────────────
     // If frontend disconnects, close the TCP connection to Python too

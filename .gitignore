@@ -2,6 +2,7 @@
 Backend/emergency.db
 emergency.db
 *.db
+*.db-journal
 *.sqlite3
 
 # Python bytecode and caches

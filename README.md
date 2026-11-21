@@ -404,3 +404,33 @@ All failed requests return a consistent error structure including the triggering
   "request": "report_incident"
 }
 ```
+
+---
+
+## Deployment
+
+AlertBridge uses a decoupled production deployment architecture:
+
+1. **Frontend (Vercel)**:
+   - Hosted on Vercel at `https://alert-bridge-sage.vercel.app/`.
+   - Single-Page Application (SPA) built with React 18 and Vite.
+   - SPA rewrite rules in `frontend/vercel.json` direct all routes to `/index.html`.
+   - Connects to the backend via secure WebSockets (`wss://`).
+   - Environment Variable: `VITE_BRIDGE_URL` (e.g. `wss://alertbridge-backend.onrender.com`).
+
+2. **Backend & Bridge (Render)**:
+   - Hosted as a single Docker Web Service on Render using `render.yaml`.
+   - The container runs Python 3 (`Backend/server.py` on 127.0.0.1:5000) and Node.js (`bridge/bridge.js` on port 8080) managed by `start.sh`.
+   - Render terminates TLS and forwards WebSocket connections directly to the Node bridge.
+   - Environment Variables:
+     - `PORT`: Listen port for WebSocket bridge (injected automatically by Render, defaults to 8080).
+     - `PYTHON_HOST`: Internal host for Python TCP server (default `127.0.0.1`).
+     - `PYTHON_PORT`: Internal port for Python TCP server (default `5000`).
+     - `ALERTBRIDGE_HOST`: Python TCP binding interface (default `127.0.0.1`).
+     - `ALERTBRIDGE_PORT`: Python TCP binding port (default `5000`).
+     - `ALLOWED_ORIGIN`: Permitted WebSocket client origin (`https://alert-bridge-sage.vercel.app`).
+
+### Operational Limits
+- **Render Free Tier Sleep**: Free instances spin down after approximately 15 minutes of inactivity. The first incoming request after sleep takes 30-50 seconds to initialize, during which the browser shows "Disconnected" before automatically connecting.
+- **Ephemeral Database Storage**: SQLite resides inside the container file system. Database state resets to default seeded demo accounts on container redeployment or restart.
+- **Academic Demonstration**: The hosted deployment is provided for live evaluation. The viva demonstration should run on `localhost` for zero-latency local socket inspection.
