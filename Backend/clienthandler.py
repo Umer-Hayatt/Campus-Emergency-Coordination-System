@@ -1,17 +1,23 @@
-from Backend.message_router import route
+from message_router import route
+import json
 
 def handleclient(client_socket):
     buffer=""
     while True:
         data=client_socket.recv(4096)
-        data=data.decode("utf-8")
-        data +=buffer
+        buffer +=data.decode("utf-8")
         lines=buffer.split("\n")
         buffer=lines[-1]
         complete=lines[:-1]
-        if data=="":
+        if not data:
             break
-        route(complete,client_socket)
+        for line in complete:
+            if line:
+                try:
+                    message = json.loads(line)
+                    route(message, client_socket)
+                except:
+                    pass
 
 
     
