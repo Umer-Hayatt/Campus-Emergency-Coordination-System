@@ -371,6 +371,62 @@ def main():
         except Exception as e:
             record("9. Abrupt client disconnect handled cleanly without server disruption", False, str(e))
 
+        # -------------------------------------------------------------
+        # CHECK 10: get_responders authorization (admin allowed, others refused)
+        # -------------------------------------------------------------
+        try:
+            # Student attempts get_responders -> refused
+            student.send({"type": "get_responders"})
+            err_stu = student.recv_until_type("error")
+            assert "Only admins can list responders" in err_stu.get("message", "")
+
+            # Responder (security) attempts get_responders -> refused
+            security.send({"type": "get_responders"})
+            err_sec = security.recv_until_type("error")
+            assert "Only admins can list responders" in err_sec.get("message", "")
+
+            # Admin attempts get_responders -> allowed
+            admin.send({"type": "get_responders"})
+            resp_admin = admin.recv_until_type("responders_list")
+            assert "responders" in resp_admin
+            assert any(r.get("role") in ("security", "medical") for r in resp_admin["responders"])
+
+            record("10. get_responders authorization (admin allowed, student and responder refused)", True)
+        except Exception as e:
+            record("10. get_responders authorization (admin allowed, student and responder refused)", False, str(e))
+
+        # -------------------------------------------------------------
+        # CHECK 11: get_incident_history authorization (reporter, admin, assigned responder allowed; others refused)
+        # -------------------------------------------------------------
+        try:
+            # incident_id was reported by student01 and assigned to med01
+            # 1. Admin allowed
+            admin.send({"type": "get_incident_history", "incident_id": incident_id})
+            hist_admin = admin.recv_until_type("incident_history")
+            assert hist_admin.get("incident_id") == incident_id
+            assert len(hist_admin.get("history", [])) > 0
+
+            # 2. Reporting student allowed
+            student.send({"type": "get_incident_history", "incident_id": incident_id})
+            hist_stu = student.recv_until_type("incident_history")
+            assert hist_stu.get("incident_id") == incident_id
+            assert len(hist_stu.get("history", [])) > 0
+
+            # 3. Assigned responder (medical) allowed
+            medical.send({"type": "get_incident_history", "incident_id": incident_id})
+            hist_med = medical.recv_until_type("incident_history")
+            assert hist_med.get("incident_id") == incident_id
+            assert len(hist_med.get("history", [])) > 0
+
+            # 4. Unassigned responder (security) refused
+            security.send({"type": "get_incident_history", "incident_id": incident_id})
+            err_sec_hist = security.recv_until_type("error")
+            assert "You can only view history for incidents assigned to you" in err_sec_hist.get("message", "")
+
+            record("11. get_incident_history authorization (admin, reporter, assigned responder allowed; unassigned refused)", True)
+        except Exception as e:
+            record("11. get_incident_history authorization (admin, reporter, assigned responder allowed; unassigned refused)", False, str(e))
+
         # Cleanup test clients
         for c in (student, admin, security, medical):
             c.close()
