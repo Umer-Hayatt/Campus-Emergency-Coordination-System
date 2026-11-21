@@ -5,8 +5,8 @@ import hashlib
 import secrets
 import hmac
 
-# SQLite database file path relative to this script directory
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "emergency.db")
+# SQLite database file path relative to this script directory or environment variable
+DB_PATH = os.environ.get("ALERTBRIDGE_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "emergency.db"))
 
 # Thread lock to serialize writes across multiple client threads
 DB_WRITE_LOCK = threading.Lock()

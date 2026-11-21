@@ -1,0 +1,14 @@
+node_modules
+frontend
+.git
+.gitignore
+emergency.db
+Backend/emergency.db
+*.db
+*.sqlite3
+dist
+__pycache__
+*.pyc
+.env
+.env.local
+.vercel

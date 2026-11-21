@@ -6,7 +6,7 @@ const net = require("net")
 const { WebSocketServer } = require("ws")
 
 // ─── CONFIGURATION ─────────────────────────────────────────
-const PORT = parseInt(process.env.PORT || "8080", 10)
+const PORT = parseInt(process.env.PORT || "7860", 10)
 const PYTHON_HOST = process.env.PYTHON_HOST || "127.0.0.1"
 const PYTHON_PORT = parseInt(process.env.PYTHON_PORT || "5000", 10)
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ? process.env.ALLOWED_ORIGIN.trim() : null
