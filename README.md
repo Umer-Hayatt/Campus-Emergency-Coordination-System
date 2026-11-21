@@ -1,105 +1,406 @@
 # Campus Emergency Coordination System
 
-A real-time campus emergency management system built with raw TCP sockets, WebSocket bridge, and React frontend.
+A robust, real-time campus emergency coordination backend built with raw Python TCP sockets, multi-threading, SQLite3, and a Node.js WebSocket bridge.
 
-## Tech Stack
+This project was built for a **Computer Networks** semester project. It demonstrates socket programming, thread-per-client concurrency, newline-delimited JSON (NDJSON) framing, synchronized in-memory client registration, thread-safe socket sends, and application-level unicast/multicast message routing.
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python (raw TCP sockets, threading, SQLite3) |
-| Bridge | Node.js (WebSocket ↔ TCP relay) |
-| Frontend | React + Vite |
+---
 
 ## Architecture
 
 ```
-React Frontend  <──WebSocket──>  Node.js Bridge  <──TCP──>  Python Server  <──>  SQLite DB
-   (port 3000)                    (port 8080)                 (port 5000)
+[Student / Admin / Responder]
+             │
+      TCP / WebSocket
+             ▼
+   ┌───────────────────┐
+   │  Node.js Bridge   │  (port 8080 - WebSocket ↔ TCP relay)
+   └─────────┬─────────┘
+             │ Raw TCP (127.0.0.1:5000)
+             ▼
+   ┌─────────────────────────────────────────────────────────┐
+   │                   Python TCP Server                     │
+   │  ┌───────────────────────────────────────────────────┐  │
+   │  │ Server Socket (server.py) - 127.0.0.1:5000        │  │
+   │  │   └─ Spawns daemon thread per connected client    │  │
+   │  └────────────────────────┬──────────────────────────┘  │
+   │                           ▼                             │
+   │  ┌───────────────────────────────────────────────────┐  │
+   │  │ Client Handler (clienthandler.py)                 │  │
+   │  │   └─ Raw byte buffer, split on b'\n', NDJSON      │  │
+   │  └────────────────────────┬──────────────────────────┘  │
+   │                           ▼                             │
+   │  ┌───────────────────────────────────────────────────┐  │
+   │  │ Message Router (message_router.py)                │  │
+   │  │   └─ Server-side identity & role validation       │  │
+   │  └───────┬────────────────────┬──────────────────┬───┘  │
+   │          ▼                    ▼                  ▼      │
+   │   ┌─────────────┐     ┌───────────────┐   ┌──────────┐  │
+   │   │   auth.py   │     │ incident_     │   │ notif_   │  │
+   │   │  (PBKDF2)   │     │ manager.py    │   │ mgr.py   │  │
+   │   └─────────────┘     └───────────────┘   └──────────┘  │
+   │          ▲                    ▲                  ▲      │
+   │          └────────────┬───────┴──────────────────┘      │
+   │                       ▼                                 │
+   │  ┌───────────────────────────────────────────────────┐  │
+   │  │ Thread-Safe Registry & Send Lock (registry.py)    │  │
+   │  │   ├─ In-memory socket / user / role mapping       │  │
+   │  │   └─ Per-connection send_lock (prevents byte mix) │  │
+   │  └────────────────────────┬──────────────────────────┘  │
+   │                           ▼                             │
+   │  ┌───────────────────────────────────────────────────┐  │
+   │  │ Database Layer (db.py) - SQLite3 + Write Lock     │  │
+   │  │   └─ users, incidents, assignments, history, notif│  │
+   │  └───────────────────────────────────────────────────┘  │
+   └─────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## Project Structure
 
 ```
-campus-emergency-system/
-├── backend/
-│   ├── server.py              # TCP server, accepts connections, spawns threads
-│   ├── client_handler.py      # Per-client thread, NDJSON message framing
-│   ├── message_router.py      # Routes messages to correct handler
-│   ├── auth.py                # Login authentication
-│   ├── incident_manager.py    # Incident CRUD operations
-│   ├── notification_manager.py # Notification handling
-│   └── db.py                  # SQLite3 schema and queries
+Campus-Emergency-Coordination-System/
+├── Backend/
+│   ├── server.py              # Main TCP server, socket setup, thread spawner
+│   ├── clienthandler.py       # Per-client recv loop, 64KB guard, NDJSON framing
+│   ├── registry.py            # Thread-safe client registry & per-connection send_lock
+│   ├── message_router.py      # Request dispatcher, server-side identity check
+│   ├── auth.py                # User login verification with PBKDF2 hashing
+│   ├── incident_manager.py    # Incident CRUD, role validation & FSM status transitions
+│   ├── notification_manager.py# Application-level unicast & group/role push routing
+│   ├── db.py                  # SQLite schema, parameterized queries, DB write lock
+│   ├── test_client.py         # Interactive CLI client with async reader thread
+│   └── test_flow.py           # Automated end-to-end integration test suite
 ├── bridge/
-│   ├── bridge.js              # WebSocket ↔ TCP relay
-│   └── package.json
-└── frontend/
-    └── (React + Vite app)
+│   ├── bridge.js              # Node.js WebSocket ↔ TCP bridge (port 8080)
+│   └── package.json           # Dependencies ("ws")
+├── frontend/
+│   ├── index.html             # HTML entry point (Anton & Inter fonts)
+│   ├── package.json           # React 18, React Router v6, Vite
+│   ├── vite.config.js         # Vite configuration (port 3000)
+│   └── src/                   # React app (Landing, Login, Student, Admin, Responder)
+├── .gitignore
+└── README.md
 ```
 
-## Features
+---
 
-- **Role-based access** — Student, Admin, Security, Medical
-- **Real-time updates** via WebSocket
-- **Incident lifecycle** — REPORTED → UNDER_REVIEW → ASSIGNED → ACCEPTED → EN_ROUTE → ON_SCENE → RESOLVED
-- **Multi-client support** — one thread per connected client
-- **Notifications** — per-user notification system
+## Roles & Demo Accounts
 
-## Demo Accounts
+All accounts use the password: `pass` (stored securely using PBKDF2-HMAC-SHA256 with random salt).
 
-| Username | Password | Role |
-|----------|----------|------|
-| student01 | pass | Student |
-| admin01 | pass | Admin |
-| sec01 | pass | Security |
-| med01 | pass | Medical |
+| Username | Password | Role | Permissions |
+|----------|----------|------|-------------|
+| `student01` | `pass` | `student` | Report incidents, view own reported incidents |
+| `admin01` | `pass` | `admin` | View all incidents, change status to `UNDER_REVIEW`, assign responders, cancel/reject incidents, broadcast notifications |
+| `sec01` | `pass` | `security` | View assigned security/fire incidents, update lifecycle status (`ACCEPTED` → `EN_ROUTE` → `ON_SCENE` → `RESOLVED`) |
+| `med01` | `pass` | `medical` | View assigned medical incidents, update lifecycle status (`ACCEPTED` → `EN_ROUTE` → `ON_SCENE` → `RESOLVED`) |
 
-## Setup & Run
+---
 
-### 1. Backend (Python)
+## Incident State Machine
+
+Status transitions follow a strict Finite State Machine (FSM):
+
+```
+[REPORTED]
+    │
+    ├── (Admin) ─────────────► [UNDER_REVIEW]
+    │                               │
+    ├── (Admin Assign) ─────────────┼──────────────► [ASSIGNED]
+    │                                                     │
+    ├── (Admin) ──► [CANCELLED] (Terminal)                ▼ (Responder)
+    │                                                [ACCEPTED]
+    └── (Admin) ──► [REJECTED]  (Terminal)                │
+                                                          ▼ (Responder)
+                                                     [EN_ROUTE]
+                                                          │
+                                                          ▼ (Responder)
+                                                     [ON_SCENE]
+                                                          │
+                                                          ▼ (Responder)
+                                                     [RESOLVED] (Terminal)
+```
+
+- **Admins** may set: `UNDER_REVIEW`, `CANCELLED`, `REJECTED`.
+- **Assigned Responders** (and only the assigned responder) may set: `ACCEPTED`, `EN_ROUTE`, `ON_SCENE`, `RESOLVED`.
+- **Students** cannot update status.
+- Terminal statuses (`RESOLVED`, `CANCELLED`, `REJECTED`) cannot be changed.
+- Incidents of type `medical` can only be assigned to responders with role `medical`.
+- Incidents of type `fire` and `security` can only be assigned to responders with role `security`.
+
+---
+
+## Setup & Running
+
+### 1. Initialize the Database
+The database will be automatically initialized when the server starts. To initialize or reset it manually:
 ```bash
-cd backend
-python db.py        # initialize database
-python server.py    # start TCP server on port 5000
+python Backend/db.py
 ```
 
-### 2. Bridge (Node.js)
+### 2. Start the TCP Server
+Binds to `127.0.0.1:5000` by default (can be overridden with `ALERTBRIDGE_HOST` and `ALERTBRIDGE_PORT` environment variables):
+```bash
+python Backend/server.py
+```
+
+### 3. Run Automated Integration Tests
+Runs 9 comprehensive automated tests across 4 simultaneous client sockets:
+```bash
+python Backend/test_flow.py
+```
+
+### 4. Interactive Test Client (CLI)
+Allows manual testing without the frontend. Pushes from other clients appear live while typing:
+```bash
+python Backend/test_client.py
+```
+
+### 5. Node.js WebSocket Bridge (for Web Frontend)
 ```bash
 cd bridge
 npm install
-node bridge.js      # start WebSocket bridge on port 8080
+node bridge.js
 ```
+The bridge listens on `ws://127.0.0.1:8080` and relays traffic to `127.0.0.1:5000`.
 
-### 3. Frontend (React)
-```bash
-cd frontend
-npm install
-npm run dev         # start on port 3000
-```
+---
 
-## Message Protocol
+## Message Protocol (NDJSON)
 
-All messages are JSON over TCP/WebSocket, delimited by `\n` (NDJSON).
+Every message is a single-line JSON string followed by `\n`.
 
-**Login:**
+### 1. Authentication
+
+#### Request: Login
 ```json
 { "type": "login", "username": "student01", "password": "pass" }
 ```
 
-**Report Incident:**
+#### Response: Success
 ```json
-{ "type": "report_incident", "title": "Fire in Lab", "description": "...", "location": "Block C", "incident_type": "fire", "reported_by": 1 }
+{ "type": "login_success", "role": "student", "user_id": 1, "username": "student01" }
 ```
 
-**Get Incidents:**
+#### Request: Logout
 ```json
-{ "type": "get_incidents", "user_id": 1, "role": "admin" }
+{ "type": "logout" }
 ```
 
-**Update Status:**
+#### Response: Logout Success
 ```json
-{ "type": "update_status", "incident_id": 1, "new_status": "RESOLVED" }
+{ "type": "logout_success", "message": "Logged out successfully" }
 ```
 
-## Course Project
+---
 
-Built as a semester project for **Computer Networks** — demonstrates TCP socket programming, multi-threading, and real-time client-server communication.
+### 2. Incidents
+
+#### Request: Report Incident (Student Only)
+Allowed `incident_type`: `"fire"`, `"medical"`, `"security"`, `"accident"`, `"other"`.  
+Allowed `severity`: `"low"`, `"medium"`, `"high"`, `"critical"`.
+```json
+{
+  "type": "report_incident",
+  "title": "Severe Asthma Attack",
+  "description": "Student in Library 3rd floor having breathing trouble",
+  "location": "Library Floor 3",
+  "incident_type": "medical",
+  "severity": "high"
+}
+```
+
+#### Response: Incident Created
+```json
+{ "type": "incident_created", "incident_id": 1 }
+```
+
+#### Push to All Admins (Real-time Broadcast)
+```json
+{
+  "type": "new_incident",
+  "incident": {
+    "id": 1,
+    "title": "Severe Asthma Attack",
+    "description": "Student in Library 3rd floor having breathing trouble",
+    "location": "Library Floor 3",
+    "type": "medical",
+    "severity": "high",
+    "status": "REPORTED",
+    "reported_by": 1,
+    "created_at": "2026-11-21 11:15:00",
+    "updated_at": "2026-11-21 11:15:00"
+  }
+}
+```
+
+---
+
+### 3. Incident Listing
+
+#### Request: Get Incidents
+*(Admin receives all incidents; student receives own; responder receives assigned incidents)*
+```json
+{ "type": "get_incidents" }
+```
+
+#### Response: Incidents List
+```json
+{
+  "type": "incidents_list",
+  "incidents": [
+    {
+      "id": 1,
+      "title": "Severe Asthma Attack",
+      "status": "REPORTED",
+      "type": "medical",
+      "severity": "high",
+      "location": "Library Floor 3",
+      "reported_by": 1,
+      "created_at": "2026-11-21 11:15:00",
+      "updated_at": "2026-11-21 11:15:00"
+    }
+  ]
+}
+```
+
+---
+
+### 4. Assignment
+
+#### Request: Assign Responder (Admin Only)
+```json
+{ "type": "assign_responder", "incident_id": 1, "responder_id": 4 }
+```
+
+#### Response: Assigned
+```json
+{ "type": "assigned", "incident_id": 1, "responder_id": 4 }
+```
+
+#### Push to Assigned Responder (Unicast Routing)
+*(Only the assigned responder receives this; other responders receive nothing)*
+```json
+{
+  "type": "assignment_received",
+  "incident_id": 1,
+  "incident": { "id": 1, "title": "Severe Asthma Attack", "status": "ASSIGNED" },
+  "assigned_by": "admin01"
+}
+```
+
+---
+
+### 5. Status Updates
+
+#### Request: Update Status
+```json
+{ "type": "update_status", "incident_id": 1, "new_status": "ACCEPTED" }
+```
+
+#### Response: Status Updated
+```json
+{ "type": "status_updated", "incident_id": 1, "new_status": "ACCEPTED" }
+```
+
+#### Push to Reporting Student & Admins (Real-time)
+```json
+{
+  "type": "incident_update",
+  "incident_id": 1,
+  "new_status": "ACCEPTED",
+  "updated_by": "med01"
+}
+```
+
+---
+
+### 6. Notifications
+
+#### Request: Get Notifications
+```json
+{ "type": "get_notifications" }
+```
+
+#### Response: Notifications List
+```json
+{
+  "type": "notifications_list",
+  "notifications": [
+    {
+      "id": 1,
+      "user_id": 4,
+      "incident_id": 1,
+      "message": "Assignment received for incident #1",
+      "is_read": 1,
+      "created_at": "2026-11-21 11:15:30"
+    }
+  ]
+}
+```
+
+#### Automatic Push on Login: Unread Notifications
+```json
+{
+  "type": "unread_notifications",
+  "notifications": [...]
+}
+```
+
+---
+
+### 7. Responders List & Incident History
+
+#### Request: Get Responders (Admin Only)
+```json
+{ "type": "get_responders" }
+```
+
+#### Response: Responders List
+```json
+{
+  "type": "responders_list",
+  "responders": [
+    { "user_id": 3, "username": "sec01", "role": "security", "online": true },
+    { "user_id": 4, "username": "med01", "role": "medical", "online": false }
+  ]
+}
+```
+
+#### Request: Get Incident History
+*(Visible to Admin, reporting student, or assigned responder)*
+```json
+{ "type": "get_incident_history", "incident_id": 1 }
+```
+
+#### Response: Incident History
+```json
+{
+  "type": "incident_history",
+  "incident_id": 1,
+  "history": [
+    {
+      "id": 1,
+      "incident_id": 1,
+      "old_status": null,
+      "new_status": "REPORTED",
+      "changed_by_username": "student01",
+      "created_at": "2026-11-21 11:15:00"
+    }
+  ]
+}
+```
+
+---
+
+### 8. Errors
+All failed requests return a consistent error structure including the triggering `request`:
+```json
+{
+  "type": "error",
+  "message": "Only students are authorized to report incidents",
+  "request": "report_incident"
+}
+```
