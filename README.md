@@ -411,29 +411,59 @@ All failed requests return a consistent error structure including the triggering
 
 ## Deployment
 
-AlertBridge uses a decoupled production deployment architecture:
+AlertBridge supports both local evaluation and remote access via a secure tunnel:
+
+### 1. Production Architecture (Vercel + Cloudflare Tunnel)
 
 1. **Frontend (Vercel)**:
    - Hosted on Vercel at `https://alert-bridge-sage.vercel.app/`.
    - Single-Page Application (SPA) built with React 18 and Vite.
    - SPA rewrite rules in `frontend/vercel.json` direct all routes to `/index.html`.
-   - Connects to the backend via secure WebSockets (`wss://`).
-   - Environment Variable: `VITE_BRIDGE_URL` (e.g. `wss://<user>-<space>.hf.space`).
+   - Connects to the bridge via secure WebSockets (`wss://`).
+   - Environment Variable: `VITE_BRIDGE_URL` (set to the Cloudflare tunnel `wss://` URL).
 
-2. **Backend & Bridge (Hugging Face Spaces)**:
-   - Hosted as a Docker Space on Hugging Face using the standalone files in `deploy/hf-space/`.
-   - Runs a non-root container (user `user` with UID 1000) listening on port 7860.
-   - The container runs Python 3 (`Backend/server.py` on 127.0.0.1:5000) and Node.js (`bridge/bridge.js` on port 7860) managed by `start.sh`.
-   - Hugging Face automatically terminates TLS and exposes secure WebSockets on `wss://<user>-<space>.hf.space`.
-   - Environment Variables:
-     - `PORT`: Listen port for WebSocket bridge (defaults to 7860).
-     - `PYTHON_HOST`: Internal host for Python TCP server (default `127.0.0.1`).
-     - `PYTHON_PORT`: Internal port for Python TCP server (default `5000`).
-     - `ALERTBRIDGE_HOST`: Python TCP binding interface (default `127.0.0.1`).
-     - `ALERTBRIDGE_PORT`: Python TCP binding port (default `5000`).
-     - `ALLOWED_ORIGIN`: Permitted WebSocket client origin (`https://alert-bridge-sage.vercel.app`).
+2. **Backend & Bridge (Local Host via Cloudflare Quick Tunnel)**:
+   - The Python TCP server and Node.js WebSocket bridge run on the local machine.
+   - Traffic is securely exposed over HTTPS/WSS using Cloudflare Quick Tunnels:
+     ```bash
+     cloudflared tunnel --url http://localhost:8080
+     ```
+   - Cloudflare terminates TLS and provides a public `https://<random>.trycloudflare.com` URL. The WebSocket endpoint is `wss://<random>.trycloudflare.com`.
+   - `VITE_BRIDGE_URL` on Vercel must be updated with this new `wss://` URL, and the frontend redeployed whenever the tunnel restarts, as quick tunnel hostnames change on each execution.
+   - If `ALLOWED_ORIGIN` is configured in `bridge/bridge.js`, it restricts connections strictly to `https://alert-bridge-sage.vercel.app` and blocks `localhost`. Leave unset during local testing.
 
-### Operational Limits
-- **Space Sleep Behavior**: Free-tier CPU Spaces pause after a period of inactivity. The first incoming request after sleep takes 30-50 seconds to initialize the container, during which the browser shows "Disconnected" before automatically connecting.
-- **Ephemeral Database Storage**: SQLite resides inside the container file system. Database state resets to default seeded demo accounts on container redeployment or restart.
-- **Academic Demonstration**: The hosted deployment is provided for live evaluation. The viva demonstration should run on `localhost` for zero-latency local socket inspection.
+### 2. Operational Limits
+- **Host Machine Dependency**: The live Vercel deployment functions only while the host machine is awake, connected to the internet, and actively running the Python server, bridge, and Cloudflare tunnel processes.
+- **Dynamic Tunnel URLs**: Free Cloudflare quick tunnels generate an ephemeral hostname on each launch, requiring an environment variable update on Vercel for remote access.
+- **Academic Grading Demo**: The graded presentation and evaluation should run entirely on `localhost` for predictable low-latency socket demonstrations without external network hops.
+
+---
+
+## Local Development (Windows Commands)
+
+To run the complete system locally for demonstration or development, open three separate terminal windows:
+
+### Terminal 1: Python TCP Server
+```powershell
+py Backend/server.py
+```
+*Listens on `127.0.0.1:5000` and creates or connects to `Backend/emergency.db`.*
+
+### Terminal 2: Node.js WebSocket Bridge
+In PowerShell:
+```powershell
+$env:PORT="8080"
+node bridge/bridge.js
+```
+Or in Command Prompt:
+```cmd
+set PORT=8080 && node bridge/bridge.js
+```
+*Listens for WebSocket connections on port `8080` and relays NDJSON packets to `127.0.0.1:5000`.*
+
+### Terminal 3: React Frontend Dev Server
+```powershell
+cd frontend
+npm run dev
+```
+*Serves the frontend at `http://localhost:5173/`, connecting by default to `ws://localhost:8080`.*

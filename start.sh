@@ -20,7 +20,7 @@ while ! nc -z 127.0.0.1 5000 2>/dev/null; do
     sleep 0.25
 done
 
-echo "[start.sh] Python TCP server ready. Starting Node WebSocket bridge on port ${PORT:-7860}..."
+echo "[start.sh] Python TCP server ready. Starting Node WebSocket bridge on port ${PORT:-8080}..."
 node bridge/bridge.js &
 NODE_PID=$!
 
